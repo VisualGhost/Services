@@ -11,8 +11,10 @@ import android.support.annotation.Nullable;
 import java.lang.ref.WeakReference;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 
 public class MyService extends Service {
@@ -26,6 +28,19 @@ public class MyService extends Service {
 
     private ThreadPoolExecutor mExecutor;
     private final IBinder mBinder = new LocalBinder();
+
+    private static final ThreadFactory THREAD_FACTORY = new ThreadFactory() {
+
+        final AtomicInteger nextId = new AtomicInteger(0);
+
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable,
+                    "MyService # " + nextId.incrementAndGet());
+            thread.setPriority(Thread.MIN_PRIORITY);
+            return thread;
+        }
+    };
 
     public class LocalBinder extends Binder {
         MyService getService() {
@@ -46,11 +61,13 @@ public class MyService extends Service {
                 MAX_THREADS,
                 1,
                 TimeUnit.SECONDS,
-                POOL_TASKS);
+                POOL_TASKS,
+                THREAD_FACTORY);
         mExecutor.prestartAllCoreThreads();
     }
 
-    void echoInBackground(final String msg, final WeakReference<ResultCallback<String>> callbackWeakReference) {
+    void echoInBackground(final String msg,
+                          final WeakReference<ResultCallback<String>> callbackWeakReference) {
         Runnable runnable = new Runnable() {
             @Override
             public void run() {
@@ -70,7 +87,9 @@ public class MyService extends Service {
     }
 
     private String echo(String s) {
-        return "Echo: " + s + " " + Thread.currentThread().getName() + ", Pool size: " + POOL_TASKS.size();
+        return "Echo: ( " + s + " ) "
+                + Thread.currentThread().getName()
+                + " POOL SIZE: " + POOL_TASKS.size();
     }
 
     private <T> void notifyInUI(final T result, final ResultCallback<T> callback) {
@@ -82,5 +101,11 @@ public class MyService extends Service {
                 callback.onResult(result);
             }
         });
+    }
+
+    @Override
+    public boolean onUnbind(Intent intent) {
+        mExecutor.shutdownNow();
+        return super.onUnbind(intent);
     }
 }
