@@ -1,23 +1,19 @@
 package com.mysevice;
 
-import android.content.ComponentName;
-import android.content.Context;
 import android.content.Intent;
-import android.content.ServiceConnection;
+import android.content.IntentFilter;
 import android.os.Bundle;
-import android.os.IBinder;
 import android.support.design.widget.FloatingActionButton;
+import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.view.View;
 import android.widget.TextView;
 
-import java.lang.ref.WeakReference;
-
 public class MainActivity extends AppCompatActivity {
 
-    private MyService mService;
-    private boolean mBound;
+    public static final String DATA = "data";
+
     private int mCount;
     private TextView mCounterTextView;
 
@@ -35,53 +31,31 @@ public class MainActivity extends AppCompatActivity {
         fab.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                if (mBound) {
-                    mService.echoInBackground(String.valueOf(mCount++), mCallbackWeakReference);
-                }
+                Intent intent = new Intent(MainActivity.this, MyService.class);
+                intent.putExtra(DATA, String.valueOf(mCount++));
+                startService(intent);
             }
         });
     }
 
-    private StringBuilder mStringBuilder = new StringBuilder();
-
-    private ResultCallback<String> mCallback = new ResultCallback<String>() {
-        @Override
-        public void onResult(String s) {
-            mStringBuilder.append(s);
-            mStringBuilder.append("\n");
-            mCounterTextView.setText(mStringBuilder.toString());
-        }
-    };
-
-    private WeakReference<ResultCallback<String>> mCallbackWeakReference = new WeakReference<ResultCallback<String>>(mCallback);
-
-    private ServiceConnection mConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName componentName, IBinder iBinder) {
-            mService = ((MyService.LocalBinder) iBinder).getService();
-            mBound = true;
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName componentName) {
-            mService = null;
-            mBound = false;
-        }
-    };
+    private MyBroadcastReceiver mReceiver = new MyBroadcastReceiver();
 
     @Override
     protected void onStart() {
         super.onStart();
-        Intent intent = new Intent(this, MyService.class);
-        bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
+        mReceiver.attachTextView(mCounterTextView);
+        IntentFilter filter =
+                new IntentFilter(MyService.BROADCAST);
+        LocalBroadcastManager.getInstance(this).
+                registerReceiver(mReceiver, filter);
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        if (mBound) {
-            unbindService(mConnection);
-            mBound = false;
-        }
+        LocalBroadcastManager
+                .getInstance(this)
+                .unregisterReceiver(mReceiver);
+        mReceiver.detach();
     }
 }

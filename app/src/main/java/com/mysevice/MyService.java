@@ -1,14 +1,17 @@
 package com.mysevice;
 
+import android.app.NotificationManager;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
-import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.support.annotation.Nullable;
+import android.support.v4.app.NotificationCompat;
+import android.support.v4.content.LocalBroadcastManager;
 
-import java.lang.ref.WeakReference;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
@@ -19,15 +22,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class MyService extends Service {
 
+    public static final String BROADCAST = "broadcast";
+    public static final String RESULT = "result";
+    public static final String HANDLED = "handled";
+
     private static final int CORE_TREADS = 3;
     private static final int MAX_THREADS = 4;
-    private static final int MAX_QUE_SIZE = 32;
 
+    private static final int MAX_QUE_SIZE = 32;
     private static final BlockingQueue<Runnable> POOL_TASKS =
             new LinkedBlockingQueue<>(MAX_QUE_SIZE);
 
     private ThreadPoolExecutor mExecutor;
-    private final IBinder mBinder = new LocalBinder();
 
     private static final ThreadFactory THREAD_FACTORY = new ThreadFactory() {
 
@@ -42,16 +48,10 @@ public class MyService extends Service {
         }
     };
 
-    public class LocalBinder extends Binder {
-        MyService getService() {
-            return MyService.this;
-        }
-    }
-
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
-        return mBinder;
+        return null;
     }
 
     @Override
@@ -66,24 +66,60 @@ public class MyService extends Service {
         mExecutor.prestartAllCoreThreads();
     }
 
-    void echoInBackground(final String msg,
-                          final WeakReference<ResultCallback<String>> callbackWeakReference) {
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        String message = intent.getStringExtra(MainActivity.DATA);
+        echoInBackground(message);
+        return START_NOT_STICKY;
+    }
+
+    void echoInBackground(final String msg) {
         Runnable runnable = new Runnable() {
             @Override
             public void run() {
-                if (callbackWeakReference != null &&
-                        callbackWeakReference.get() != null) {
-                    try {
-                        Thread.sleep(2000);
-                    } catch (InterruptedException e) {
-                        // empty
-                    }
-                    String echo = echo(msg);
-                    notifyInUI(echo, callbackWeakReference.get());
-                }
+                String echo = echo(msg);
+                SystemClock.sleep(3000);
+                notifyInUI(echo);
             }
         };
         mExecutor.execute(runnable);
+    }
+
+    private void notifyInUI(final String message) {
+        Looper mainLooper = Looper.getMainLooper();
+        Handler handler = new Handler(mainLooper);
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                Intent intent = new Intent(BROADCAST);
+                sendLocalBroadcast(intent, message);
+                boolean handled = intent.getBooleanExtra(HANDLED, false);
+                if (!handled) {
+                    sendNotification(message);
+                }
+            }
+        });
+    }
+
+    private void sendLocalBroadcast(Intent intent, String message) {
+        intent.putExtra(RESULT, message);
+        LocalBroadcastManager
+                .getInstance(MyService.this)
+                .sendBroadcastSync(intent);
+    }
+
+    private void sendNotification(String message) {
+
+        NotificationCompat.Builder builder =
+                new NotificationCompat.Builder(this)
+                        .setSmallIcon(R.drawable.ic_face_black_24dp)
+                        .setContentTitle("This is Title")
+                        .setContentText(message);
+
+        NotificationManager nm = (NotificationManager) getSystemService(
+                Context.NOTIFICATION_SERVICE);
+
+        nm.notify(message.hashCode(), builder.build());
     }
 
     private String echo(String s) {
@@ -92,20 +128,9 @@ public class MyService extends Service {
                 + " POOL SIZE: " + POOL_TASKS.size();
     }
 
-    private <T> void notifyInUI(final T result, final ResultCallback<T> callback) {
-        Looper mainLooper = Looper.getMainLooper();
-        Handler handler = new Handler(mainLooper);
-        handler.post(new Runnable() {
-            @Override
-            public void run() {
-                callback.onResult(result);
-            }
-        });
-    }
-
     @Override
-    public boolean onUnbind(Intent intent) {
+    public boolean stopService(Intent name) {
         mExecutor.shutdownNow();
-        return super.onUnbind(intent);
+        return super.stopService(name);
     }
 }
